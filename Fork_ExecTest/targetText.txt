@@ -1,0 +1,7 @@
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root         1  0.0  0.0   1804  1188 ?        Sl   14:27   0:00 /init
+root         7  0.0  0.0   1824    88 ?        Ss   14:28   0:00 /init
+root         8  0.0  0.0   1824   104 ?        S    14:28   0:00 /init
+hachiman     9  0.0  0.0   6816  6016 pts/0    Ss   14:28   0:00 -bash
+hachiman   208  0.0  0.0   6348  2012 pts/0    S+   16:08   0:00 ./test
+hachiman   209  0.0  0.0   8276  4204 pts/0    R+   16:08   0:00 ps aux
