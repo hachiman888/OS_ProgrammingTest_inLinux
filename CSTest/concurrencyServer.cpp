@@ -7,7 +7,7 @@ void CatchSignal(int sig_num){
     return ;
 }
 
-void set_reuseport(int sockfd) {     //设置端口复用
+void set_reuseport(int sockfd) {     //设置端口复用,使得每个子进程都可以绑定这个端口。
     int opt = 1;
     if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) == -1) {
         std::cerr << "setsockopt reuseport error: " << getting_error_msg(errno) << std::endl;

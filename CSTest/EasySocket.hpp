@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string>
+#include <cstring>
 
 std::string getting_error_msg(int err_num){
     std::error_code ec(err_num,std::generic_category());
@@ -53,9 +54,19 @@ public:
 
     void easy_bind(const int type,int port_num,const std::string ip_addr){
         sockaddr_in serverAddr;
+        memset(&serverAddr,0,sizeof(sockaddr_in));
         serverAddr.sin_family = type;
         serverAddr.sin_port = htons(port_num);
-        serverAddr.sin_addr.s_addr = htonl(std::stoi(ip_addr));
+        
+        if (ip_addr == "0.0.0.0") {
+            serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        } else {
+            if (inet_pton(type, ip_addr.c_str(), &serverAddr.sin_addr) <= 0) {
+                std::cerr << "inet_pton error! Invalid IP address" << std::endl;
+                exit(-2);
+            }
+        }
+
         int ret = bind(this->sockfd,
             std::bit_cast<sockaddr*>(&serverAddr),sizeof(sockaddr_in));
         //或者使用reinterpret_cast
