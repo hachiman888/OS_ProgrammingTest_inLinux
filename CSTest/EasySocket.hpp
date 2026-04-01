@@ -26,7 +26,8 @@ public:
         other.sockfd = -1;
     }
     eSocket& operator=(eSocket&& other){
-        if(this->sockfd != other.sockfd && other.sockfd != -1){
+        if(this->sockfd != other.sockfd){
+            if (sockfd != -1) close(sockfd); 
             this->sockfd = other.sockfd;
             other.sockfd = -1;
         }
@@ -36,8 +37,12 @@ public:
     eSocket(const eSocket& other) = delete;
     eSocket& operator=(const eSocket& other) = delete;
 
-    ~eSocket(){
-        if(sockfd != -1) close(sockfd);
+    ~eSocket() noexcept {
+        if (sockfd != -1) {
+            while (close(sockfd) == -1 && errno == EINTR) {
+                continue;
+            }
+        }
     }
 
     int getSockFD() const {
