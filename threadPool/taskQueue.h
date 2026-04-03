@@ -12,7 +12,7 @@ class ThreadPool;
 template<class T>
 class Task{
 public:
-    std::function<void(T*)>callback; //function不可拷贝，只可移动
+    std::function<void(T*)>callback; //不可拷贝，只可移动
     T* m_arg;
 
     template<typename F>

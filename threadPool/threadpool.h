@@ -32,8 +32,10 @@ public:
 
         if(manager.joinable())
             manager.join();
-
-        queueNotEmpty.notify_all();//让全部线程自我销毁
+        {   
+            std::lock_guard<std::mutex> locker(tpMutex);
+            queueNotEmpty.notify_all();//让全部线程自我销毁
+        }
 
         for(std::thread& elem : working_ThreadArray){
             if(elem.joinable())
@@ -122,31 +124,32 @@ private:
                     }
                 }
             }
-                //判断线程池是否被关闭
-                if(this->shutdown_flags == true){
-                    std::cout << "thread be killed..." << std::endl;
-                    return ;
-                }
+            
+            //判断线程池是否被关闭
+            if(this->shutdown_flags == true){
+                std::cout << "thread be killed..." << std::endl;
+                return ;
+            }
 
                 //从任务队列中取出一个任务
-                auto taskOpt = task_Queue_->takeTask(); 
-                //如果taskOpt为std::nullopt,那么下面直接获取taskOpt会抛出致命异常
-                if(taskOpt){
-                    Task<T> t = std::move(*taskOpt);
-                    //忙碌线程+1
-                    this->m_busy_threads++;
-                    //线程池解锁
-                    locker.unlock();
-                    //执行任务
-                    std::cout << "thread:" << std::this_thread::get_id() << "\tstart working..." << std::endl;
-                    t.callback(t.m_arg);
-                    //执行完毕，标记arg为nullptr
-                    t.m_arg = nullptr;
+            auto taskOpt = task_Queue_->takeTask(); 
+            //如果taskOpt为std::nullopt,那么下面直接获取taskOpt会抛出致命异常
+            if(taskOpt){
+                Task<T> t = std::move(*taskOpt);
+                //忙碌线程+1
+                this->m_busy_threads++;
+                //线程池解锁
+                locker.unlock();
+                //执行任务
+                std::cout << "thread:" << std::this_thread::get_id() << "\tstart working..." << std::endl;
+                t.callback(t.m_arg);
+                //执行完毕，标记arg为nullptr
+                t.m_arg = nullptr;
 
-                    //任务结束
-                    std::cout << "thread:" << std::this_thread::get_id() << "\tend working..." << std::endl;
-                    this->m_busy_threads--;
-                }
+                //任务结束
+                std::cout << "thread:" << std::this_thread::get_id() << "\tend working..." << std::endl;
+                this->m_busy_threads--;
+            }
         }
         return ;
     }
