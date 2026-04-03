@@ -16,6 +16,7 @@ public:
     {
         task_Queue_ = std::make_unique<TaskQueue<T>>();
         shutdown_flags.store(false);
+        working_ThreadArray.reserve(m_thread_MAXNUM);
 
         for(int i = 0; i < m_thread_MINNUM;i++){
             working_ThreadArray.emplace_back(std::thread(&ThreadPool::worker_Func,this));
@@ -24,18 +25,21 @@ public:
         manager = std::thread(&ThreadPool::manager_Func,this);
     }
 
+    //TODO
+    //若通知时，某个worker线程尚未达到wait处，信号丢失
     ~ThreadPool(){
         shutdown_flags = true;
-        queueNotEmpty.notify_all();//让全部线程自我销毁
 
         if(manager.joinable())
             manager.join();
 
-        std::lock_guard<std::mutex> lock(tpMutex);
+        queueNotEmpty.notify_all();//让全部线程自我销毁
+
         for(std::thread& elem : working_ThreadArray){
             if(elem.joinable())
                 elem.join();
         }
+
     }
 
     void addTask(Task<T>&& t){
@@ -97,10 +101,13 @@ private:
         return ;
     }
 
+    //TODO
+    //若线程的退出依赖于条件变量的信号，那么错过信号则无法退出
     void worker_Func(){
         while(true){
             std::unique_lock<std::mutex> locker(tpMutex);
             // 判断任务队列是否为空, 如果为空工作线程阻塞
+            //如果以下while包裹了取出任务的逻辑，那么可能会因为wait的虚假唤醒，而瞬间爆炸
             while(task_Queue_->getSize() == 0 && this->shutdown_flags != true){
                 std::cout << "thread:" << std::this_thread::get_id() << "\twaiting..." << std::endl; 
                 queueNotEmpty.wait(locker);
@@ -109,14 +116,15 @@ private:
                     if(m_alive_threads > m_thread_MINNUM){
                         m_alive_threads--;
                         m_exit_threads--;
-                        locker.unlock();
+                        std::cout << "thread be killed..." << std::endl;
                         return ;
+                        //线程结束自动释放锁
                     }
                 }
             }
                 //判断线程池是否被关闭
                 if(this->shutdown_flags == true){
-                    locker.unlock();
+                    std::cout << "thread be killed..." << std::endl;
                     return ;
                 }
 
