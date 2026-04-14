@@ -1,4 +1,0 @@
-/home/hachiman/networkProgrammingByAsio/build/CMakeFiles/server.dir
-/home/hachiman/networkProgrammingByAsio/build/CMakeFiles/client.dir
-/home/hachiman/networkProgrammingByAsio/build/CMakeFiles/edit_cache.dir
-/home/hachiman/networkProgrammingByAsio/build/CMakeFiles/rebuild_cache.dir
