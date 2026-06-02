@@ -5,16 +5,18 @@
 //以及控制消息队列的大小，防止单一程序挤压其他程序的运行空间
 
 //v6旨在添加json序列化处理
-//v8旨在改进消息体结构，区分收发节点的结构。
+//v8，v9旨在解耦网络通信层和逻辑处理层，为后序的多线程模式铺路
+//v9旨在添加单例模板类，使得服务器逻辑处理层可以使用单例模式，
 #pragma once
 #include "const.h"
 #include "MsgNode.h"
+#include "LogicSystem.h"
 #include <iostream>
 #include "boost/asio.hpp"
 #include <memory>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include "server_v6.h"
+#include "server_v9.h"
 #include <mutex>
 #include <queue>
 #include <jsoncpp/json/json.h>
@@ -25,6 +27,9 @@ namespace ip = asio::ip;
 using tcp = ip::tcp;
 
 class Server;
+class Msg_Node;
+class Send_Node;
+class Recv_Node;
 
 class Session : public std::enable_shared_from_this<Session>{
 public:
@@ -74,3 +79,12 @@ private:
     bool _b_close;                                //用于表示socket是否关闭
     std::shared_ptr<Msg_Node> _recv_Head_Node;    //存储的消息节点的头部信息
 }; 
+
+class LogicNode{
+    friend class LogicSystem;
+public:
+    LogicNode(std::shared_ptr<Session>,std::shared_ptr<Recv_Node>);
+private:
+    std::shared_ptr<Session> _session;
+    std::shared_ptr<Recv_Node> _recv_node;
+};

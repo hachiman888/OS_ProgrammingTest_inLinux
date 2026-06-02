@@ -1,9 +1,9 @@
-#include "session_v4.h"
+#include "session_v9.h"
 #include <iostream>
 
 void Session::start(){ 
-    memset(_data,0,max_length);
-    this->_socket.async_read_some(asio::buffer(_data,max_length),
+    memset(_data,0,MAX_LENGTH);
+    this->_socket.async_read_some(asio::buffer(_data,MAX_LENGTH),
     std::bind(&Session::handle_Read,this,std::placeholders::_1,std::placeholders::_2,shared_from_this())); 
 }
 
@@ -21,46 +21,59 @@ void Session::handle_Read(const boost::system::error_code& ec,std::size_t bytes_
             if(!_b_head_parse) //如果头节点尚未被处理，则执行此处逻辑
             {
                 //如果消息节点的头部信息所存储的长度 + 当前已读取的bytes 仍然小于 规定消息头长度，则执行
-                //此处无需记录_data的偏移位置copy_len,因为_data已经全塞进去了，但还是不够2字节
-                if(bytes_transfered + _recv_Head_Node->_cur_len < HEAD_LENGTH) 
+                //此处无需记录_data的偏移位置copy_len,因为_data已经全塞进去了，但还是不够4字节
+                if(bytes_transfered + _recv_Head_Node->_cur_len < HEAD_TOTAL_LEN) 
                 {   
                     //将已读到tcp缓冲区的数据，复制到消息节点的头部信息中
                     memcpy(_recv_Head_Node->_data + _recv_Head_Node->_cur_len,_data + copy_len,bytes_transfered);
                     _recv_Head_Node->_cur_len += bytes_transfered;//记录当前存储到消息节点头部的长度
-                    ::memset(_data,0,max_length);//清空缓冲区，用于再次读
-                    _socket.async_read_some(asio::buffer(_data,max_length),
+                    ::memset(_data,0,MAX_LENGTH);//清空缓冲区，用于再次读
+                    _socket.async_read_some(asio::buffer(_data,MAX_LENGTH),
                         std::bind(&Session::handle_Read,this,std::placeholders::_1,std::placeholders::_2,shared_from_this()));
                     return ;
                 }
 
                 //收到的数据长度比规定头部长度长，则执行以下逻辑
                 //头部剩余的还未复制的长度
-                int head_remain = HEAD_LENGTH - _recv_Head_Node->_cur_len;
+                int head_remain = HEAD_TOTAL_LEN - _recv_Head_Node->_cur_len;
                 ::memcpy(_recv_Head_Node->_data + _recv_Head_Node->_cur_len,_data + copy_len,head_remain);
-                copy_len += head_remain;    //更新已处理的data长度和剩余未处理的长度
+                copy_len += head_remain;    //更新已处理的_data长度和剩余未处理的长度
                 bytes_transfered -= head_remain;
 
-                //开始获取并解析头部记录的字节长度
-                unsigned short data_len = 0;
-                memcpy(&data_len,_recv_Head_Node->_data,HEAD_LENGTH);
-                std::cout << "the len of data is " << data_len << std::endl;
-                //若消息头部所记录的消息长度非法
-                if(data_len > max_length) 
-                {
-                    std::cout << "invaild data length is " << data_len << std::endl;
+                //先处理消息id
+                short msg_id = 0;
+                memcpy(&msg_id,_recv_Head_Node->_data,HEAD_ID_LEN);
+                msg_id = asio::detail::socket_ops::network_to_host_short(msg_id); //网络字节序转换为本地字节序
+                std::cout << "msg id is " << msg_id << std::endl;
+
+                if(msg_id > MAX_LENGTH) { //防御性编程
+                    std::cout << "invaild msg_id is " << msg_id << std::endl;
                     _server->clearSession(_uuid);
                     return ;
                 }
-                _recv_Msg_Node = std::make_shared<Msg_Node>(data_len);//构造消息体
+
+                //开始获取并解析头部记录的字节长度
+                short msg_len = 0;
+                memcpy(&msg_len,_recv_Head_Node->_data + HEAD_ID_LEN,HEAD_DATA_LEN);
+                msg_len = asio::detail::socket_ops::network_to_host_short(msg_len); //转换为本地字节序
+                std::cout << "the len of data is " << msg_len << std::endl;
+                //若消息头部所记录的消息长度非法
+                if(msg_len > MAX_LENGTH) 
+                {
+                    std::cout << "invaild data length is " << msg_len << std::endl;
+                    _server->clearSession(_uuid);
+                    return ;
+                }
+                _recv_Msg_Node = std::make_shared<Recv_Node>(msg_len,msg_id);//构造消息体
 
                 //如果readsome读到的字节数小于头部规定的长度，则说明数据还未接收完，先存储进入消息节点中
-                if(bytes_transfered < data_len)
+                if(bytes_transfered < msg_len)
                 {   
                     //此处_data + copy_len使得_data偏移到仍未被复制的位置
                     memcpy(_recv_Msg_Node->_data + _recv_Msg_Node->_cur_len,_data + copy_len,bytes_transfered);
                     _recv_Msg_Node->_cur_len += bytes_transfered;
-                    ::memset(_data,0,max_length); //清空，接着读
-                    _socket.async_read_some(asio::buffer(_data,max_length),
+                    ::memset(_data,0,MAX_LENGTH); //清空，接着读
+                    _socket.async_read_some(asio::buffer(_data,MAX_LENGTH),
                         std::bind(&Session::handle_Read,this,std::placeholders::_1,std::placeholders::_2,shared_from_this()));
                     _b_head_parse = true;   //标记头部处理完成，使得下次触发回调时，进入处理消息体逻辑
                     return ;
@@ -69,19 +82,17 @@ void Session::handle_Read(const boost::system::error_code& ec,std::size_t bytes_
                 //若上一次小于，下一次大于，则不会执行以下逻辑，会执行if(!_b_head_parse)外的逻辑
                 //此处是处理并读取头节点内规定的消息长度后，对消息节点内容的第一次填充的逻辑
                 //如果读到的字节数大于头部规定的长度，则有冗余
-                memcpy(_recv_Msg_Node->_data + _recv_Msg_Node->_cur_len,_data + copy_len,data_len);
-                _recv_Msg_Node->_cur_len += data_len;
-                copy_len += data_len; //更新copy_len，使得_data正确偏移
-                bytes_transfered -= data_len;
+                memcpy(_recv_Msg_Node->_data + _recv_Msg_Node->_cur_len,_data + copy_len,msg_len);
+                _recv_Msg_Node->_cur_len += msg_len;
+                copy_len += msg_len; //更新copy_len，使得_data正确偏移
+                bytes_transfered -= msg_len;
                 _recv_Msg_Node->_data[_recv_Msg_Node->_total_len] = '\0';//主动添加\0
-                std::cout << "receive data is " << _recv_Msg_Node->_data << std::endl;
-                //send一次，测试
-                send(_recv_Msg_Node->_data,_recv_Msg_Node->_total_len);
+                LogicSystem::GetInstance()->PostMsgToQueue(std::make_shared<LogicNode>(shared_from_this(),_recv_Msg_Node));
                 _b_head_parse = false; //本次消息节点处理完毕
                 _recv_Head_Node->Clear();//复用节点
                 if(bytes_transfered <= 0){
-                    ::memset(_data,0,max_length);
-                    _socket.async_read_some(asio::buffer(_data,max_length),
+                    ::memset(_data,0,MAX_LENGTH);
+                    _socket.async_read_some(asio::buffer(_data,MAX_LENGTH),
                         std::bind(&Session::handle_Read,this,std::placeholders::_1,std::placeholders::_2,shared_from_this()));
                     return ;
                 }
@@ -95,8 +106,8 @@ void Session::handle_Read(const boost::system::error_code& ec,std::size_t bytes_
             {
                 memcpy(_recv_Msg_Node->_data + _recv_Msg_Node->_cur_len,_data + copy_len,bytes_transfered);
                 _recv_Msg_Node->_cur_len += bytes_transfered;
-                memset(_data,0,max_length);
-                _socket.async_read_some(asio::buffer(_data,max_length),
+                memset(_data,0,MAX_LENGTH);
+                _socket.async_read_some(asio::buffer(_data,MAX_LENGTH),
                     std::bind(&Session::handle_Read,this,std::placeholders::_1,std::placeholders::_2,shared_from_this()));
                 return ;
             }
@@ -108,13 +119,12 @@ void Session::handle_Read(const boost::system::error_code& ec,std::size_t bytes_
             bytes_transfered -= remain_msg;
             copy_len += remain_msg;
             _recv_Msg_Node->_data[_recv_Msg_Node->_total_len] = '\0';
-            std::cout << "receive data is " << _recv_Msg_Node->_data << std::endl;
-            send(_recv_Msg_Node->_data,_recv_Msg_Node->_total_len); //测试发送
+            LogicSystem::GetInstance()->PostMsgToQueue(std::make_shared<LogicNode>(shared_from_this(),_recv_Msg_Node));
             _b_head_parse = false; //继续处理剩余数据（bytes_transfered中的残余数据）
             _recv_Head_Node->Clear(); //清空复用
             if(bytes_transfered <= 0){
-                    ::memset(_data,0,max_length);
-                    _socket.async_read_some(asio::buffer(_data,max_length),
+                    ::memset(_data,0,MAX_LENGTH);
+                    _socket.async_read_some(asio::buffer(_data,MAX_LENGTH),
                         std::bind(&Session::handle_Read,this,std::placeholders::_1,std::placeholders::_2,shared_from_this()));
                     return ;
             }
@@ -124,34 +134,62 @@ void Session::handle_Read(const boost::system::error_code& ec,std::size_t bytes_
 }
 
 void Session::handle_Write(const boost::system::error_code& ec,std::shared_ptr<Session> _self_shared){
-    if(ec){
-        std::cerr << "write error!" << std::endl;
-        _server->clearSession(_uuid);
-    }
-    else{
-        std::lock_guard<std::mutex> locker(_send_lock);
-        _send_queue.pop();//此处先pop是因为async_write发送的是队首的数据，只有发送成功了，才会调用回调函数，所以先出队
-        if(!_send_queue.empty()){
-            auto& msg = _send_queue.front();
-            asio::async_write(_socket,asio::buffer(msg->_data,msg->_total_len),
-            std::bind(&Session::handle_Write,this,std::placeholders::_1,shared_from_this()));
+    //添加异常处理
+    try{
+        if(ec){
+            std::cerr << "write error!" << std::endl;
+            _server->clearSession(_uuid);
+        }
+        else{
+            std::lock_guard<std::mutex> locker(_send_lock);
+            _send_queue.pop();//此处先pop是因为async_write发送的是队首的数据，只有发送成功了，才会调用回调函数，所以先出队
+            if(!_send_queue.empty()){
+                auto& msg = _send_queue.front();
+                asio::async_write(_socket,asio::buffer(msg->_data,msg->_total_len),
+                std::bind(&Session::handle_Write,this,std::placeholders::_1,shared_from_this()));
+            }
         }
     }
+    catch(std::exception& e){
+        std::cerr << "exception occur! exception is " << e.what() << std::endl;
+    }
 }
 
-void Session::send(char* msg,std::size_t max_len){
-    bool pending = false;//先创建一个局部变量pending，pending为true时，队列内存在未发完的数据，false，队列为空
+void Session::send(char* msg,short max_len,short msg_id){
     std::lock_guard<std::mutex> locker(_send_lock); 
-    if(_send_queue.size() > 0){ //若队列中仍存在数据，说明队列中残留有未发完的数据
-        pending = true;
+    std::size_t send_queue_size = _send_queue.size();
+    if(send_queue_size > MAX_SEND_QUEUE){
+        std::cout << "session: " << _uuid << " send que fulled, size is " << MAX_SEND_QUEUE << std::endl;
+        return ;
+    } 
+
+    _send_queue.emplace(std::make_shared<Send_Node>(msg,max_len,msg_id)); //先将当前数据加入队列
+    if(send_queue_size > 0){ //若队列中仍存在数据，说明队列中残留有未发完的数据
+        return ;
     }
 
-    _send_queue.emplace(std::make_shared<Msg_Node>(msg,max_len)); //先将当前数据加入队列
-    if(pending){ //再判断是否未决
-        return;
-    }
-
-    auto msg_node = _send_queue.front();
+    auto& msg_node = _send_queue.front();
     asio::async_write(_socket,asio::buffer(msg_node->_data,msg_node->_total_len),
-    std::bind(&Session::handle_Write,this,std::placeholders::_1,shared_from_this()));
+        std::bind(&Session::handle_Write,this,std::placeholders::_1,shared_from_this()));
 }
+
+void Session::send(std::string msg,short msg_id){
+    std::lock_guard<std::mutex> locker(_send_lock);
+    std::size_t send_queue_size = _send_queue.size();
+    if(send_queue_size > MAX_SEND_QUEUE){
+        std::cout << "session: " << _uuid << " send que fulled, size is " << MAX_SEND_QUEUE << std::endl;
+        return ;
+    }
+
+    _send_queue.emplace(std::make_shared<Send_Node>(msg.c_str(),msg.size(),msg_id));
+    if(send_queue_size > 0){
+        return ;
+    }
+
+    auto& msg_node = _send_queue.front();
+    asio::async_write(_socket,asio::buffer(msg_node->_data,msg_node->_total_len),
+        std::bind(&Session::handle_Write,this,std::placeholders::_1,shared_from_this()));
+}
+
+LogicNode::LogicNode(std::shared_ptr<Session> session,std::shared_ptr<Recv_Node> recv_node)
+    : _session(session),_recv_node(recv_node){}

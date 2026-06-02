@@ -5,16 +5,19 @@
 //以及控制消息队列的大小，防止单一程序挤压其他程序的运行空间
 
 //v6旨在添加json序列化处理
-//v8旨在改进消息体结构，区分收发节点的结构。
+//v8，v9旨在解耦网络通信层和逻辑处理层，为后序的多线程模式铺路
+//v9旨在添加单例模板类，使得服务器逻辑处理层可以使用单例模式，
+//v10_v2旨在使用另一种多线程模型来提高并发效率,即多个线程共同操作一个ioc的模式，不如IOServicePool
 #pragma once
 #include "const.h"
 #include "MsgNode.h"
+#include "LogicSystem.h"
 #include <iostream>
 #include "boost/asio.hpp"
 #include <memory>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include "server_v6.h"
+#include "server_v9.h"
 #include <mutex>
 #include <queue>
 #include <jsoncpp/json/json.h>
@@ -25,12 +28,16 @@ namespace ip = asio::ip;
 using tcp = ip::tcp;
 
 class Server;
+class Msg_Node;
+class Send_Node;
+class Recv_Node;
 
 class Session : public std::enable_shared_from_this<Session>{
 public:
     Session(boost::asio::io_context& io,Server* server):_socket(io),_server(server),
     _b_head_parse(false),_b_close(false),
-    _recv_Head_Node(std::make_shared<Msg_Node>(HEAD_TOTAL_LEN)) //v4修改此处构造函数，避免空指针
+    _recv_Head_Node(std::make_shared<Msg_Node>(HEAD_TOTAL_LEN)), //v4修改此处构造函数，避免空指针
+    _strand(io.get_executor()) //获取其执行器对象，与 _strand绑定
     {
         boost::uuids::uuid a_uuid = boost::uuids::random_generator()();//生成随机值
         _uuid = boost::uuids::to_string(a_uuid);
@@ -73,4 +80,16 @@ private:
     bool _b_head_parse;                           //用于表示是否处理完头部信息
     bool _b_close;                                //用于表示socket是否关闭
     std::shared_ptr<Msg_Node> _recv_Head_Node;    //存储的消息节点的头部信息
+    boost::asio::strand<boost::asio::io_context::executor_type> _strand;
+    //strand使用时，需要绑定对应对象的执行器类型，strand用于收束回调函数，使得其串行调用
+    //若strand对象绑定了ioc的执行器，那么strand和ioc执行器共同管理同一套就绪事件数组的派发流程
 }; 
+
+class LogicNode{
+    friend class LogicSystem;
+public:
+    LogicNode(std::shared_ptr<Session>,std::shared_ptr<Recv_Node>);
+private:
+    std::shared_ptr<Session> _session;
+    std::shared_ptr<Recv_Node> _recv_node;
+};

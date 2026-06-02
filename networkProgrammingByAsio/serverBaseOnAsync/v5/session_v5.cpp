@@ -149,7 +149,7 @@ void Session::send(char* msg,short max_len){
     } 
 
     _send_queue.emplace(std::make_shared<Msg_Node>(msg,max_len)); //先将当前数据加入队列
-    if(_send_queue.size() > 0){ //若队列中仍存在数据，说明队列中残留有未发完的数据
+    if(send_queue_size > 0){ //若队列中仍存在数据，说明队列中残留有未发完的数据
         return ;
     }
 
