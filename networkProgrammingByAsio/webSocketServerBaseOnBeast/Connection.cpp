@@ -1,3 +1,5 @@
+//被wsl捅刀子，宿主机作为客户端发起请求永远会在升级协议那一步，立马断开连接，但是在wsl环境请求和申请就没有问题
+//他妈的
 #include "Connection.h"
 #include "ConnectionManager.h"
 
@@ -20,51 +22,25 @@ net::ip::tcp::socket& Connection::GetSocket(){
     //返回websocket最底层的socket的引用
 }
 
-// void Connection::AsyncAccept(){
-//     auto self = shared_from_this();     //延长Connection对象生命周期
+void Connection::AsyncAccept(){
+    auto self = shared_from_this();     //延长Connection对象生命周期
 
-//     ConnectionMgr::GetInstance().AddConnection(self);  //连接建立成功，将连接交由管理类管理，提前加入哈希表中，保证connection不在strand空档中提前析构
-//     _ws_ptr->async_accept([self](boost::system::error_code ec){ 
-//     // websocket异步接收连接。调用这个函数意味着，在tcp基础上，将协议升级为websocket
-//         try{
-//             if(!ec){            
-//                 self->Start();  //若连接建立成功，则开始进入读写逻辑 
-//             }else{
-//                 std::cerr << "websocket async accept error!" 
-//                     << "\terror is " << ec.what() << std::endl;
-//                 ConnectionMgr::GetInstance().RmConnection(self->_uuid); //升级失败，移除连接
-//             }
-//         }catch(std::exception& e){
-//             std::cerr << "websocket async accept exception is " 
-//                 << e.what() << std::endl;
-//         }
-//     });            
-// }
-void Connection::AsyncAccept()
-{
-	auto self = shared_from_this();
-    
-	// 【核心修正】在调用 async_accept 之前，提前加入单例管理器
-	// 这样可以确保在多线程 Strand 调度排队期间，Connection 对象的引用计数绝对大于 0
-	ConnectionMgr::GetInstance().AddConnection(self);
-
-	_ws_ptr->async_accept([self](boost::system::error_code err) {
-		try {
-			if (!err) {
-				// 教学版原本写在这里，现在移到外面去了
-				self->Start();
-			}
-			else {
-				std::cout << "websocket accept failed, err is " << err.what() << std::endl;
-				// 【核心修正】如果握手失败了，再从管理器中踢出销毁
-				ConnectionMgr::GetInstance().RmConnection(self->GetUid());
-			}
-		}
-		catch (std::exception& exp) {
-			std::cout << "websocket async accept exception is " << exp.what() << std::endl;
-			ConnectionMgr::GetInstance().RmConnection(self->GetUid());
-		}
-	});
+    ConnectionMgr::GetInstance().AddConnection(self);  //连接建立成功，将连接交由管理类管理，提前加入哈希表中，保证connection不在strand空档中提前析构
+    _ws_ptr->async_accept([self](boost::system::error_code ec){ 
+    // websocket异步接收连接。调用这个函数意味着，在tcp基础上，将协议升级为websocket
+        try{
+            if(!ec){            
+                self->Start();  //若连接建立成功，则开始进入读写逻辑 
+            }else{
+                std::cerr << "websocket async accept error!" 
+                    << "\terror is " << ec.what() << std::endl;
+                ConnectionMgr::GetInstance().RmConnection(self->_uuid); //升级失败，移除连接
+            }
+        }catch(std::exception& e){
+            std::cerr << "websocket async accept exception is " 
+                << e.what() << std::endl;
+        }
+    });            
 }
 
 void Connection::AsyncSend(std::string msg){
